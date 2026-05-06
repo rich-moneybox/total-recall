@@ -26,7 +26,7 @@ public static class FamilyPaymentsServiceRegistration
 
         // AML check service — currently embedded in the payments service.
         // Should be extracted to a shared library per ADR-047.
-        // services.AddScoped<IAmlCheckService, AmlCheckService>();
+        services.AddScoped<IAmlCheckService, AmlCheckService>();
 
         return services;
     }
