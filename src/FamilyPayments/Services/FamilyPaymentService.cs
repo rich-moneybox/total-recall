@@ -10,20 +10,28 @@ using Moneybox.Payments.FamilyPayments.Models;
 /// 
 /// Architecture decision: extend existing payments service for tax-year deadline,
 /// with phase-two extraction planned. See ADR-047 for trade-off documentation.
+/// 
+/// Concurrency: uses optimistic locking on the ISA allowance. We check allowance on
+/// initiation, then do a conditional write at confirmation. If the balance changed
+/// between those two points (concurrent payment), we reject and ask the family member
+/// to re-initiate. See May 6 build planning discussion.
 /// </summary>
 public class FamilyPaymentService : IFamilyPaymentService
 {
     private readonly IIsaAllowanceService _isaAllowanceService;
     private readonly IAmlCheckService _amlCheckService;
+    private readonly IPaymentLinkService _paymentLinkService;
     private readonly ILogger<FamilyPaymentService> _logger;
 
     public FamilyPaymentService(
         IIsaAllowanceService isaAllowanceService,
         IAmlCheckService amlCheckService,
+        IPaymentLinkService paymentLinkService,
         ILogger<FamilyPaymentService> logger)
     {
         _isaAllowanceService = isaAllowanceService;
         _amlCheckService = amlCheckService;
+        _paymentLinkService = paymentLinkService;
         _logger = logger;
     }
 
@@ -53,8 +61,8 @@ public class FamilyPaymentService : IFamilyPaymentService
             return CreateResponse(paymentId, request, FamilyPaymentStatus.Rejected);
         }
 
-        // Step 2: Synchronous ISA allowance validation
-        // Cannot use eventual consistency here — regulatory limit must be enforced strictly
+        // Step 2: Check ISA allowance (read — no deduction yet)
+        // This is the "check" phase of optimistic locking
         var allowance = await _isaAllowanceService.GetAllowanceAsync(
             request.IsaAccountId, cancellationToken);
 
@@ -67,13 +75,31 @@ public class FamilyPaymentService : IFamilyPaymentService
             return CreateResponse(paymentId, request, FamilyPaymentStatus.Rejected);
         }
 
+        // Step 3: Conditional write — deduct allowance only if balance hasn't changed
+        // This prevents race conditions where concurrent payments both pass validation
+        var deduction = await _isaAllowanceService.ConfirmDeductionAsync(
+            request.IsaAccountId,
+            request.Amount,
+            allowance.UsedAllowance,
+            cancellationToken);
+
+        if (!deduction.Succeeded)
+        {
+            _logger.LogWarning(
+                "Family payment {PaymentId} failed optimistic lock — allowance was modified concurrently. {Reason}",
+                paymentId, deduction.ConflictReason);
+
+            return CreateResponse(paymentId, request, FamilyPaymentStatus.AllowanceConflict);
+        }
+
         _logger.LogInformation(
-            "Family payment {PaymentId} validated. Allowance remaining after payment: {Remaining}",
+            "Family payment {PaymentId} confirmed. Allowance remaining after payment: {Remaining}",
             paymentId, allowance.RemainingAllowance - request.Amount);
 
-        // Step 3: Accept the payment
-        // In production this would persist to the database and trigger downstream processing
-        return CreateResponse(paymentId, request, FamilyPaymentStatus.Accepted);
+        // Step 4: Generate payment link for the family member journey
+        var link = await _paymentLinkService.GenerateLinkAsync(paymentId, request, cancellationToken);
+
+        return CreateResponse(paymentId, request, FamilyPaymentStatus.Accepted, link.Url);
     }
 
     public Task<FamilyPaymentResponse?> GetPaymentAsync(Guid paymentId, CancellationToken cancellationToken = default)
@@ -83,7 +109,7 @@ public class FamilyPaymentService : IFamilyPaymentService
     }
 
     private static FamilyPaymentResponse CreateResponse(
-        Guid paymentId, FamilyPaymentRequest request, FamilyPaymentStatus status)
+        Guid paymentId, FamilyPaymentRequest request, FamilyPaymentStatus status, string? paymentLinkUrl = null)
     {
         return new FamilyPaymentResponse
         {
@@ -91,7 +117,8 @@ public class FamilyPaymentService : IFamilyPaymentService
             IsaAccountId = request.IsaAccountId,
             Amount = request.Amount,
             Status = status,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            PaymentLinkUrl = paymentLinkUrl
         };
     }
 }
