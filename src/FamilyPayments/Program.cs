@@ -6,6 +6,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 
+// CORS — allow the frontend to call the API
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+});
+
 // LaunchDarkly — staged rollout: 5% initially, 25% after 24h observation, then 100%
 // Rollback runbook must be ready to disable within 15 minutes
 var ldClient = new LdClient(
@@ -17,5 +24,8 @@ builder.Services.AddFamilyPayments(
 
 var app = builder.Build();
 
+app.UseCors();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.MapControllers();
 app.Run();

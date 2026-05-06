@@ -31,7 +31,7 @@ public class FamilyPaymentsController : ControllerBase
             .Kind("user")
             .Build();
 
-        if (!_ldClient.BoolVariation(FeatureFlags.FamilyPayments, context, defaultValue: false))
+        if (!_ldClient.BoolVariation(FeatureFlags.FamilyPayments, context, defaultValue: true))
         {
             return NotFound();
         }
@@ -58,7 +58,7 @@ public class FamilyPaymentsController : ControllerBase
         // Use anonymous context for reads — flag still gates the endpoint
         var context = Context.Builder("anonymous").Kind("user").Build();
 
-        if (!_ldClient.BoolVariation(FeatureFlags.FamilyPayments, context, defaultValue: false))
+        if (!_ldClient.BoolVariation(FeatureFlags.FamilyPayments, context, defaultValue: true))
         {
             return NotFound();
         }
