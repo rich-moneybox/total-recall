@@ -18,6 +18,7 @@ public record FamilyPaymentResponse
     public decimal Amount { get; init; }
     public FamilyPaymentStatus Status { get; init; }
     public DateTime CreatedAt { get; init; }
+    public string? PaymentLinkUrl { get; init; }
 }
 
 public enum FamilyPaymentStatus
@@ -27,6 +28,7 @@ public enum FamilyPaymentStatus
     AllowanceValidated,
     Accepted,
     Rejected,
+    AllowanceConflict,
     Failed
 }
 
@@ -37,4 +39,6 @@ public record IsaAllowanceDetails
     public decimal UsedAllowance { get; init; }
     public decimal RemainingAllowance => AnnualLimit - UsedAllowance;
     public int TaxYear { get; init; }
+    /// <summary>Version/ETag for optimistic locking on conditional writes.</summary>
+    public string? ETag { get; init; }
 }

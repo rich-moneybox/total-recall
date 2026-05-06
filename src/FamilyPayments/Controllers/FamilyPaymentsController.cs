@@ -1,7 +1,8 @@
 namespace Moneybox.Payments.FamilyPayments.Controllers;
 
+using LaunchDarkly.Sdk;
+using LaunchDarkly.Sdk.Server.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.FeatureManagement;
 using Moneybox.Payments.FamilyPayments.Interfaces;
 using Moneybox.Payments.FamilyPayments.Models;
 
@@ -10,14 +11,14 @@ using Moneybox.Payments.FamilyPayments.Models;
 public class FamilyPaymentsController : ControllerBase
 {
     private readonly IFamilyPaymentService _familyPaymentService;
-    private readonly IFeatureManager _featureManager;
+    private readonly ILdClient _ldClient;
 
     public FamilyPaymentsController(
         IFamilyPaymentService familyPaymentService,
-        IFeatureManager featureManager)
+        ILdClient ldClient)
     {
         _familyPaymentService = familyPaymentService;
-        _featureManager = featureManager;
+        _ldClient = ldClient;
     }
 
     [HttpPost]
@@ -25,7 +26,12 @@ public class FamilyPaymentsController : ControllerBase
         [FromBody] FamilyPaymentRequest request,
         CancellationToken cancellationToken)
     {
-        if (!await _featureManager.IsEnabledAsync(FeatureFlags.FamilyPayments))
+        // LaunchDarkly feature flag — staged rollout: 5% → 25% → 100%
+        var context = Context.Builder(request.IsaAccountId.ToString())
+            .Kind("user")
+            .Build();
+
+        if (!_ldClient.BoolVariation(FeatureFlags.FamilyPayments, context, defaultValue: true))
         {
             return NotFound();
         }
@@ -40,6 +46,7 @@ public class FamilyPaymentsController : ControllerBase
         return result.Status switch
         {
             FamilyPaymentStatus.Accepted => Ok(result),
+            FamilyPaymentStatus.AllowanceConflict => Conflict(result),
             FamilyPaymentStatus.Rejected => UnprocessableEntity(result),
             _ => StatusCode(500, result)
         };
@@ -48,7 +55,10 @@ public class FamilyPaymentsController : ControllerBase
     [HttpGet("{paymentId:guid}")]
     public async Task<IActionResult> GetPayment(Guid paymentId, CancellationToken cancellationToken)
     {
-        if (!await _featureManager.IsEnabledAsync(FeatureFlags.FamilyPayments))
+        // Use anonymous context for reads — flag still gates the endpoint
+        var context = Context.Builder("anonymous").Kind("user").Build();
+
+        if (!_ldClient.BoolVariation(FeatureFlags.FamilyPayments, context, defaultValue: true))
         {
             return NotFound();
         }

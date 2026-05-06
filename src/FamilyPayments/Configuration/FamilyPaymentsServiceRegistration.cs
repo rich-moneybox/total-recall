@@ -17,6 +17,7 @@ public static class FamilyPaymentsServiceRegistration
         string isaServiceBaseUrl)
     {
         services.AddScoped<IFamilyPaymentService, FamilyPaymentService>();
+        services.AddScoped<IPaymentLinkService, PaymentLinkService>();
 
         services.AddHttpClient<IIsaAllowanceService, IsaAllowanceServiceClient>(client =>
         {
